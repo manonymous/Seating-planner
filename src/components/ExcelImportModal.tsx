@@ -89,7 +89,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
       nivelApoyo: 'Ordinario',
       necesitaPrimeraFila: false,
       afinidades: [],
-      enemistades: [],
+      incompatibilidades: [],
     }));
 
     onImport(newAlumnos, replaceExisting);

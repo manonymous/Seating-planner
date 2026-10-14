@@ -17,18 +17,18 @@ import { DEFAULT_AULA_CONFIG, generateAula } from './lib/aulaGenerator';
 
 // Datos iniciales enriquecidos
 const initialAlumnos: Alumno[] = [
-  { id: '1', nombre: 'Ana', apellidos: 'García', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['2'], enemistades: ['5'] },
-  { id: '2', nombre: 'Carlos', apellidos: 'López', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['1'], enemistades: [] },
-  { id: '3', nombre: 'María', apellidos: 'Martínez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['4'], enemistades: [] },
-  { id: '4', nombre: 'Juan', apellidos: 'Pérez', nivelApoyo: 'Nivel III', necesitaPrimeraFila: true, afinidades: ['3'], enemistades: ['6'] },
-  { id: '5', nombre: 'Elena', apellidos: 'Ruiz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['6'], enemistades: ['1'] },
-  { id: '6', nombre: 'David', apellidos: 'Sánchez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['5'], enemistades: ['4'] },
-  { id: '7', nombre: 'Lucía', apellidos: 'Gómez', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['8'], enemistades: [] },
-  { id: '8', nombre: 'Mateo', apellidos: 'Díaz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['7'], enemistades: [] },
-  { id: '9', nombre: 'Sara', apellidos: 'Torres', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['10'], enemistades: [] },
-  { id: '10', nombre: 'Hugo', apellidos: 'Vega', nivelApoyo: 'Nivel IV', necesitaPrimeraFila: true, afinidades: ['9'], enemistades: ['11'] },
-  { id: '11', nombre: 'Irene', apellidos: 'Morales', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], enemistades: ['10'] },
-  { id: '12', nombre: 'Pablo', apellidos: 'Navarro', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], enemistades: [] },
+  { id: '1', nombre: 'Ana', apellidos: 'García', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['2'], incompatibilidades: ['5'] },
+  { id: '2', nombre: 'Carlos', apellidos: 'López', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['1'], incompatibilidades: [] },
+  { id: '3', nombre: 'María', apellidos: 'Martínez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['4'], incompatibilidades: [] },
+  { id: '4', nombre: 'Juan', apellidos: 'Pérez', nivelApoyo: 'Nivel III', necesitaPrimeraFila: true, afinidades: ['3'], incompatibilidades: ['6'] },
+  { id: '5', nombre: 'Elena', apellidos: 'Ruiz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['6'], incompatibilidades: ['1'] },
+  { id: '6', nombre: 'David', apellidos: 'Sánchez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['5'], incompatibilidades: ['4'] },
+  { id: '7', nombre: 'Lucía', apellidos: 'Gómez', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['8'], incompatibilidades: [] },
+  { id: '8', nombre: 'Mateo', apellidos: 'Díaz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['7'], incompatibilidades: [] },
+  { id: '9', nombre: 'Sara', apellidos: 'Torres', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['10'], incompatibilidades: [] },
+  { id: '10', nombre: 'Hugo', apellidos: 'Vega', nivelApoyo: 'Nivel IV', necesitaPrimeraFila: true, afinidades: ['9'], incompatibilidades: ['11'] },
+  { id: '11', nombre: 'Irene', apellidos: 'Morales', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], incompatibilidades: ['10'] },
+  { id: '12', nombre: 'Pablo', apellidos: 'Navarro', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], incompatibilidades: [] },
 ];
 
 const initialAula: Aula = generateAula(DEFAULT_AULA_CONFIG);

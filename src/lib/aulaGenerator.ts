@@ -97,13 +97,13 @@ export function generateAula(
 }
 
 /**
- * Analiza conflictos de afinidades, enemistades y posición en primera fila
+ * Analiza conflictos de afinidades, incompatibilidades y posición en primera fila
  */
 export function checkClassroomIssues(alumnos: Alumno[], mesas: Mesa[]) {
   const studentMap = new Map<string, Alumno>();
   alumnos.forEach((a) => studentMap.set(a.id, a));
 
-  const conflicts: { alumno1: Alumno; alumno2: Alumno; mesaNumero: number; tipo: 'enemistad' }[] = [];
+  const conflicts: { alumno1: Alumno; alumno2: Alumno; mesaNumero: number; tipo: 'incompatibilidad' }[] = [];
   const affinitiesMet: { alumno1: Alumno; alumno2: Alumno; mesaNumero: number }[] = [];
   const frontRowWarnings: { alumno: Alumno; fila: number }[] = [];
 
@@ -131,15 +131,15 @@ export function checkClassroomIssues(alumnos: Alumno[], mesas: Mesa[]) {
         const s1 = presentStudents[i];
         const s2 = presentStudents[j];
 
-        const s1Enemies = getStudentEnmities(s1);
-        const s2Enemies = getStudentEnmities(s2);
+        const s1Enemies = getStudentIncompatibilities(s1);
+        const s2Enemies = getStudentIncompatibilities(s2);
 
         if (s1Enemies.includes(s2.id) || s2Enemies.includes(s1.id)) {
           conflicts.push({
             alumno1: s1,
             alumno2: s2,
             mesaNumero: mesa.numero,
-            tipo: 'enemistad',
+            tipo: 'incompatibilidad',
           });
         }
 
@@ -176,13 +176,13 @@ export function getStudentAffinities(alumno: Alumno): string[] {
   return Array.from(result);
 }
 
-export function getStudentEnmities(alumno: Alumno): string[] {
+export function getStudentIncompatibilities(alumno: Alumno): string[] {
   const result = new Set<string>();
-  if (alumno.enemistades && Array.isArray(alumno.enemistades)) {
-    alumno.enemistades.forEach((id) => id && result.add(id));
+  if (alumno.incompatibilidades && Array.isArray(alumno.incompatibilidades)) {
+    alumno.incompatibilidades.forEach((id) => id && result.add(id));
   }
-  if (alumno.enemistadId) {
-    result.add(alumno.enemistadId);
+  if (alumno.incompatibilidadId) {
+    result.add(alumno.incompatibilidadId);
   }
   return Array.from(result);
 }
@@ -190,7 +190,7 @@ export function getStudentEnmities(alumno: Alumno): string[] {
 /**
  * Algoritmo inteligente de distribución de alumnos en mesas respetando:
  * 1. Necesidad de primera fila -> mesas de fila 0
- * 2. Evitar enemistades en la misma mesa
+ * 2. Evitar incompatibilidades en la misma mesa
  * 3. Fomentar afinidades en la misma mesa
  */
 export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
@@ -210,13 +210,13 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
 
   // Helper para verificar compatibilidad de un alumno con los ya sentados en una mesa
   function canSitTogether(student: Alumno, seatedIds: (string | null)[]): boolean {
-    const studentEnemies = getStudentEnmities(student);
+    const studentEnemies = getStudentIncompatibilities(student);
     for (const sid of seatedIds) {
       if (!sid) continue;
       const seated = studentMap.get(sid);
       if (!seated) continue;
       if (studentEnemies.includes(seated.id)) return false;
-      if (getStudentEnmities(seated).includes(student.id)) return false;
+      if (getStudentIncompatibilities(seated).includes(student.id)) return false;
     }
     return true;
   }

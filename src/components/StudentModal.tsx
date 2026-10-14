@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Alumno, NivelApoyo } from '../types';
 import { X, UserPlus, Heart, ShieldAlert } from 'lucide-react';
-import { getStudentAffinities, getStudentEnmities } from '../lib/aulaGenerator';
+import { getStudentAffinities, getStudentIncompatibilities } from '../lib/aulaGenerator';
 
 interface StudentModalProps {
   isOpen: boolean;
@@ -23,7 +23,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
   const [nivelApoyo, setNivelApoyo] = useState<NivelApoyo>('Ordinario');
   const [necesitaPrimeraFila, setNecesitaPrimeraFila] = useState(false);
   const [selectedAfinidades, setSelectedAfinidades] = useState<string[]>([]);
-  const [selectedEnemistades, setSelectedEnemistades] = useState<string[]>([]);
+  const [selectedIncompatibilidades, setSelectedIncompatibilidades] = useState<string[]>([]);
   const [notas, setNotas] = useState('');
 
   useEffect(() => {
@@ -33,7 +33,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       setNivelApoyo(alumnoToEdit.nivelApoyo);
       setNecesitaPrimeraFila(alumnoToEdit.necesitaPrimeraFila);
       setSelectedAfinidades(getStudentAffinities(alumnoToEdit));
-      setSelectedEnemistades(getStudentEnmities(alumnoToEdit));
+      setSelectedIncompatibilidades(getStudentIncompatibilities(alumnoToEdit));
       setNotas(alumnoToEdit.notas || '');
     } else {
       setNombre('');
@@ -41,7 +41,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       setNivelApoyo('Ordinario');
       setNecesitaPrimeraFila(false);
       setSelectedAfinidades([]);
-      setSelectedEnemistades([]);
+      setSelectedIncompatibilidades([]);
       setNotas('');
     }
   }, [alumnoToEdit, isOpen]);
@@ -57,16 +57,16 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       setSelectedAfinidades(selectedAfinidades.filter((item) => item !== id));
     } else {
       setSelectedAfinidades([...selectedAfinidades, id]);
-      // Quitar de enemistades si estuviera seleccionado
-      setSelectedEnemistades(selectedEnemistades.filter((item) => item !== id));
+      // Quitar de incompatibilidades si estuviera seleccionado
+      setSelectedIncompatibilidades(selectedIncompatibilidades.filter((item) => item !== id));
     }
   };
 
-  const toggleEnemistad = (id: string) => {
-    if (selectedEnemistades.includes(id)) {
-      setSelectedEnemistades(selectedEnemistades.filter((item) => item !== id));
+  const toggleIncompatibilidad = (id: string) => {
+    if (selectedIncompatibilidades.includes(id)) {
+      setSelectedIncompatibilidades(selectedIncompatibilidades.filter((item) => item !== id));
     } else {
-      setSelectedEnemistades([...selectedEnemistades, id]);
+      setSelectedIncompatibilidades([...selectedIncompatibilidades, id]);
       // Quitar de afinidades si estuviera seleccionado
       setSelectedAfinidades(selectedAfinidades.filter((item) => item !== id));
     }
@@ -83,7 +83,7 @@ export const StudentModal: React.FC<StudentModalProps> = ({
       nivelApoyo,
       necesitaPrimeraFila,
       afinidades: selectedAfinidades,
-      enemistades: selectedEnemistades,
+      incompatibilidades: selectedIncompatibilidades,
       notas: notas.trim(),
     };
 
@@ -216,14 +216,14 @@ export const StudentModal: React.FC<StudentModalProps> = ({
             )}
           </div>
 
-          {/* Enemistades (Compañeros incompatibles) */}
+          {/* Incompatibilidades (Compañeros incompatibles) */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-semibold text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
-                <ShieldAlert className="h-3.5 w-3.5 text-rose-600" /> Incompatibilidades / Enemistades (Evitar juntos)
+                <ShieldAlert className="h-3.5 w-3.5 text-rose-600" /> Incompatibilidades (Evitar juntos)
               </label>
               <span className="text-[11px] text-slate-400">
-                {selectedEnemistades.length} seleccionados
+                {selectedIncompatibilidades.length} seleccionados
               </span>
             </div>
             {otherStudents.length === 0 ? (
@@ -233,12 +233,12 @@ export const StudentModal: React.FC<StudentModalProps> = ({
             ) : (
               <div className="max-h-28 overflow-y-auto border border-rose-200 rounded-lg p-2 bg-rose-50/30 flex flex-wrap gap-1.5">
                 {otherStudents.map((s) => {
-                  const isSelected = selectedEnemistades.includes(s.id);
+                  const isSelected = selectedIncompatibilidades.includes(s.id);
                   return (
                     <button
                       type="button"
                       key={s.id}
-                      onClick={() => toggleEnemistad(s.id)}
+                      onClick={() => toggleIncompatibilidad(s.id)}
                       className={`text-xs px-2.5 py-1 rounded-full font-medium transition-all flex items-center gap-1 ${
                         isSelected
                           ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'

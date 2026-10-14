@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
-import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd';
+import React, { useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { DragDropContext, Droppable, Draggable, DropResult, DragStart, DragUpdate } from '@hello-pangea/dnd';
+import html2canvas from 'html2canvas';
 import { Alumno, Aula, Mesa } from '../types';
 import { 
   Users, 
@@ -13,13 +15,15 @@ import {
   Printer,
   ZoomIn,
   ZoomOut,
-  LayoutGrid
+  LayoutGrid,
+  Image,
+  ArrowDownUp
 } from 'lucide-react';
 import { 
   autoAssignStudents, 
   checkClassroomIssues, 
   getStudentAffinities, 
-  getStudentEnmities 
+  getStudentIncompatibilities 
 } from '../lib/aulaGenerator';
 
 interface SeatingCanvasProps {
@@ -39,6 +43,9 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const [zoomPercent, setZoomPercent] = useState<number>(100);
+  const [draggingStudentId, setDraggingStudentId] = useState<string | null>(null);
+  const [dragSourceId, setDragSourceId] = useState<string | null>(null);
+  const [dragHoverTarget, setDragHoverTarget] = useState<string | null>(null);
 
   // Mapear alumnos por ID para acceso rápido
   const studentMap = new Map<string, Alumno>();
@@ -59,11 +66,64 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
       (`${a.nombre} ${a.apellidos}`.toLowerCase().includes(filterQuery.toLowerCase()))
   );
 
-  // Análisis de conflictos y afinidades
-  const issues = checkClassroomIssues(alumnos, aula.mesas);
+  // Previsualización dinámica de mesas durante el drag (para ver los intercambios y compatibilidades en tiempo real)
+  const previewMesas: Mesa[] = useMemo(() => {
+    if (!draggingStudentId || !dragHoverTarget || !dragHoverTarget.startsWith('mesa-')) {
+      return aula.mesas;
+    }
+
+    const cloned: Mesa[] = aula.mesas.map((m) => ({
+      ...m,
+      alumnoIds: [...m.alumnoIds],
+    }));
+
+    const targetParts = dragHoverTarget.split('-seat-');
+    const targetMesaId = targetParts[0];
+    const targetSeatIndex = parseInt(targetParts[1], 10);
+    const targetMesa = cloned.find((m) => m.id === targetMesaId);
+
+    if (!targetMesa) return aula.mesas;
+
+    const existingStudentId = targetMesa.alumnoIds[targetSeatIndex];
+    targetMesa.alumnoIds[targetSeatIndex] = draggingStudentId;
+
+    if (dragSourceId && dragSourceId.startsWith('mesa-')) {
+      const srcParts = dragSourceId.split('-seat-');
+      const srcMesaId = srcParts[0];
+      const srcSeatIndex = parseInt(srcParts[1], 10);
+      const srcMesa = cloned.find((m) => m.id === srcMesaId);
+      if (srcMesa) {
+        srcMesa.alumnoIds[srcSeatIndex] = existingStudentId || null;
+      }
+    }
+
+    return cloned;
+  }, [aula.mesas, draggingStudentId, dragSourceId, dragHoverTarget]);
+
+  // Análisis de conflictos y afinidades en tiempo real considerando la previsualización
+  const issues = useMemo(() => {
+    return checkClassroomIssues(alumnos, previewMesas);
+  }, [alumnos, previewMesas]);
 
   // Manejador del Drag and Drop
+  const onDragStart = (start: DragStart) => {
+    setDraggingStudentId(start.draggableId);
+    setDragSourceId(start.source.droppableId);
+  };
+
+  const onDragUpdate = (update: DragUpdate) => {
+    if (update.destination) {
+      setDragHoverTarget(update.destination.droppableId);
+    } else {
+      setDragHoverTarget(null);
+    }
+  };
+
   const onDragEnd = (result: DropResult) => {
+    setDraggingStudentId(null);
+    setDragSourceId(null);
+    setDragHoverTarget(null);
+
     const { source, destination, draggableId } = result;
 
     if (!destination) return;
@@ -161,9 +221,84 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
     window.print();
   };
 
-  // Agrupar mesas por filas para renderizado organizado
+  // Exportar como imagen (PNG o JPG)
+  const handleExportImage = async (format: 'png' | 'jpeg' = 'png') => {
+    const canvasElement = document.getElementById('seating-canvas-export');
+    if (!canvasElement) return;
+
+    try {
+      const canvas = await html2canvas(canvasElement, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      });
+      const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+      const dataUrl = canvas.toDataURL(mimeType, 0.95);
+      const link = document.createElement('a');
+      const aulaName = (aula.nombre || 'aula').toLowerCase().replace(/\s+/g, '-');
+      link.download = `plano-asientos-${aulaName}.${format === 'jpeg' ? 'jpg' : 'png'}`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error('Error exportando imagen:', err);
+      alert('Hubo un error al exportar la imagen.');
+    }
+  };
+
+  // Rotar filas hacia atrás: todos los alumnos pasan una fila atrás, y la última pasa a 1ª fila
+  const handleRotateRows = () => {
+    setAula((prev) => {
+      const { mesas } = prev;
+      const totalFilas = Math.max(prev.filas || 0, ...mesas.map((m) => m.fila + 1));
+      if (totalFilas <= 1) return prev;
+
+      const mesasPorFila: Mesa[][] = [];
+      for (let i = 0; i < totalFilas; i++) {
+        mesasPorFila[i] = mesas.filter((m) => m.fila === i).sort((a, b) => a.columna - b.columna);
+      }
+
+      const nuevasAsignaciones = new Map<string, (string | null)[]>();
+
+      mesas.forEach((mesa) => {
+        // La fila que se desplaza hacia esta posición:
+        // Fila 1 (idx 0) recibe a la última fila (totalFilas - 1)
+        // Fila 2 (idx 1) recibe a Fila 1 (idx 0), etc.
+        const sourceFila = (mesa.fila - 1 + totalFilas) % totalFilas;
+        const sourceMesas = mesasPorFila[sourceFila] || [];
+        const currentFilaMesas = mesasPorFila[mesa.fila] || [];
+        const colIndex = currentFilaMesas.findIndex((m) => m.id === mesa.id);
+
+        let sourceMesa: Mesa | undefined;
+        if (colIndex !== -1 && colIndex < sourceMesas.length) {
+          sourceMesa = sourceMesas[colIndex];
+        } else {
+          sourceMesa = sourceMesas.find((m) => m.columna === mesa.columna) || sourceMesas[0];
+        }
+
+        if (sourceMesa) {
+          const nuevosAlumnos = [...sourceMesa.alumnoIds];
+          while (nuevosAlumnos.length < mesa.capacidad) nuevosAlumnos.push(null);
+          if (nuevosAlumnos.length > mesa.capacidad) nuevosAlumnos.length = mesa.capacidad;
+          nuevasAsignaciones.set(mesa.id, nuevosAlumnos);
+        } else {
+          nuevasAsignaciones.set(mesa.id, new Array(mesa.capacidad).fill(null));
+        }
+      });
+
+      return {
+        ...prev,
+        mesas: mesas.map((m) => ({
+          ...m,
+          alumnoIds: nuevasAsignaciones.get(m.id) || new Array(m.capacidad).fill(null),
+        })),
+      };
+    });
+  };
+
+  // Agrupar mesas por filas para renderizado organizado (usando mesas previsualizadas durante drag)
   const filasArray: Mesa[][] = [];
-  aula.mesas.forEach((mesa) => {
+  previewMesas.forEach((mesa) => {
     const r = mesa.fila ?? 0;
     if (!filasArray[r]) filasArray[r] = [];
     filasArray[r].push(mesa);
@@ -258,7 +393,7 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
           <button
             onClick={handleAutoAssign}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
-            title="Distribuye automáticamente respetando 1ª fila, juntando afinidades y separando enemistades"
+            title="Distribuye automáticamente respetando 1ª fila, juntando afinidades y separando incompatibilidades"
           >
             <Sparkles className="h-4 w-4" />
             Distribución Automática Inteligente
@@ -273,6 +408,33 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
             Desalojar Todos
           </button>
 
+          <button
+            onClick={handleRotateRows}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 rounded-xl text-xs font-semibold shadow-sm transition-all"
+            title="Mueve todos los alumnos una fila hacia atrás, y los de la última fila pasan a 1ª fila"
+          >
+            <ArrowDownUp className="h-3.5 w-3.5 text-indigo-600" />
+            Rotar Filas (+1 Atrás)
+          </button>
+
+          <button
+            onClick={() => handleExportImage('png')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 rounded-xl text-xs font-semibold shadow-sm transition-all"
+            title="Exportar plano en imagen de alta resolución (PNG)"
+          >
+            <Image className="h-3.5 w-3.5 text-blue-600" />
+            Exportar PNG
+          </button>
+
+          <button
+            onClick={() => handleExportImage('jpeg')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 rounded-xl text-xs font-semibold shadow-sm transition-all"
+            title="Exportar plano en imagen (JPG)"
+          >
+            <Image className="h-3.5 w-3.5 text-emerald-600" />
+            Exportar JPG
+          </button>
+
           {/* Botón Imprimir en PDF */}
           <button
             onClick={handlePrintPdf}
@@ -285,7 +447,7 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
         </div>
       </div>
 
-      <DragDropContext onDragEnd={onDragEnd}>
+      <DragDropContext onDragStart={onDragStart} onDragUpdate={onDragUpdate} onDragEnd={onDragEnd}>
         <div className="flex-1 flex overflow-hidden">
           
           {/* SIDEBAR: Alumnos pendientes de asignar (oculto al imprimir) */}
@@ -340,59 +502,71 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                   ) : (
                     unassignedStudents.map((alumno, index) => {
                       const affinities = getStudentAffinities(alumno);
-                      const enmities = getStudentEnmities(alumno);
+                      const incompatibilidades = getStudentIncompatibilities(alumno);
 
                       return (
                         <Draggable key={alumno.id} draggableId={alumno.id} index={index}>
-                          {(provided, dragSnapshot) => (
-                            <div
-                              ref={provided.innerRef}
-                              {...provided.draggableProps}
-                              {...provided.dragHandleProps}
-                              className={`p-2.5 rounded-xl border transition-all select-none ${
-                                dragSnapshot.isDragging
-                                  ? 'bg-indigo-50 border-indigo-400 shadow-xl scale-105 ring-2 ring-indigo-400 z-50'
-                                  : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <div className="font-semibold text-xs text-slate-800">
-                                  {alumno.nombre} {alumno.apellidos}
+                          {(provided, dragSnapshot) => {
+                            const isThisDragged = dragSnapshot.isDragging;
+                            const cardNode = (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                style={{
+                                  ...provided.draggableProps.style,
+                                  ...(isThisDragged ? { width: '280px', zIndex: 9999 } : {})
+                                }}
+                                className={`p-2.5 rounded-xl border transition-all select-none ${
+                                  isThisDragged
+                                    ? 'bg-white border-indigo-500 shadow-2xl ring-4 ring-indigo-400/30 opacity-95 pointer-events-none cursor-grabbing'
+                                    : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="font-semibold text-xs text-slate-800">
+                                    {alumno.nombre} {alumno.apellidos}
+                                  </div>
+                                  <span
+                                    className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
+                                      alumno.nivelApoyo === 'Ordinario'
+                                        ? 'bg-slate-100 text-slate-600'
+                                        : alumno.nivelApoyo === 'Nivel II'
+                                        ? 'bg-yellow-100 text-yellow-800'
+                                        : alumno.nivelApoyo === 'Nivel III'
+                                        ? 'bg-orange-100 text-orange-800'
+                                        : 'bg-rose-100 text-rose-800'
+                                    }`}
+                                  >
+                                    {alumno.nivelApoyo}
+                                  </span>
                                 </div>
-                                <span
-                                  className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${
-                                    alumno.nivelApoyo === 'Ordinario'
-                                      ? 'bg-slate-100 text-slate-600'
-                                      : alumno.nivelApoyo === 'Nivel II'
-                                      ? 'bg-yellow-100 text-yellow-800'
-                                      : alumno.nivelApoyo === 'Nivel III'
-                                      ? 'bg-orange-100 text-orange-800'
-                                      : 'bg-rose-100 text-rose-800'
-                                  }`}
-                                >
-                                  {alumno.nivelApoyo}
-                                </span>
-                              </div>
 
-                              <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px]">
-                                {alumno.necesitaPrimeraFila && (
-                                  <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 font-medium flex items-center gap-0.5">
-                                    <Eye className="h-2.5 w-2.5" /> 1ª Fila
-                                  </span>
-                                )}
-                                {affinities.length > 0 && (
-                                  <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-medium flex items-center gap-0.5">
-                                    <Heart className="h-2.5 w-2.5 fill-emerald-500" /> {affinities.length} afin.
-                                  </span>
-                                )}
-                                {enmities.length > 0 && (
-                                  <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 font-medium flex items-center gap-0.5">
-                                    <ShieldAlert className="h-2.5 w-2.5" /> {enmities.length} incomp.
-                                  </span>
-                                )}
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[10px]">
+                                  {alumno.necesitaPrimeraFila && (
+                                    <span className="px-1.5 py-0.2 rounded bg-blue-100 text-blue-700 font-medium flex items-center gap-0.5">
+                                      <Eye className="h-2.5 w-2.5" /> 1ª Fila
+                                    </span>
+                                  )}
+                                  {affinities.length > 0 && (
+                                    <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-medium flex items-center gap-0.5">
+                                      <Heart className="h-2.5 w-2.5 fill-emerald-500" /> {affinities.length} afin.
+                                    </span>
+                                  )}
+                                  {incompatibilidades.length > 0 && (
+                                    <span className="px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 font-medium flex items-center gap-0.5">
+                                      <ShieldAlert className="h-2.5 w-2.5" /> {incompatibilidades.length} incomp.
+                                    </span>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-                          )}
+                            );
+
+                            if (isThisDragged) {
+                              return createPortal(cardNode, document.body);
+                            }
+                            return cardNode;
+                          }}
                         </Draggable>
                       );
                     })
@@ -418,7 +592,8 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
 
             {/* Contenedor del Lienzo que preserva el diseño físico de columnas y filas exactas */}
             <div 
-              style={{ transform: `scale(${zoomPercent / 100})`, transformOrigin: 'top center' }}
+              id="seating-canvas-export"
+              style={{ zoom: `${zoomPercent}%` } as React.CSSProperties}
               className="print-canvas w-fit min-w-max bg-white rounded-3xl shadow-lg border border-slate-200/90 p-8 flex flex-col items-center transition-transform duration-150"
             >
               
@@ -515,8 +690,52 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                               <div className="flex items-center flex-nowrap gap-1.5">
                                 {mesa.alumnoIds.map((studentId, seatIndex) => {
                                   const droppableId = `${mesa.id}-seat-${seatIndex}`;
+                                  const isHoverTarget = draggingStudentId !== null && dragHoverTarget === droppableId;
+                                  const isSourceSeat = draggingStudentId !== null && dragSourceId === droppableId;
+
+                                  // Estudiante actual en este puesto (según la previsualización de mesas)
                                   const student = studentId ? studentMap.get(studentId) : null;
+                                  const isTemporarySwap = isSourceSeat && Boolean(student && student.id !== draggingStudentId);
                                   const isFrontRowWarning = student?.necesitaPrimeraFila && mesa.fila > 0;
+
+                                  // Datos de compatibilidad para la zona de drop mientras se arrastra
+                                  let hoverCompatType: 'affinity' | 'conflict' | 'neutral' | null = null;
+                                  let companionNames: string[] = [];
+
+                                  if (isHoverTarget && draggingStudentId) {
+                                    const draggedStudent = studentMap.get(draggingStudentId);
+                                    if (draggedStudent) {
+                                      const companionIds = mesa.alumnoIds.filter(
+                                        (id, idx) => idx !== seatIndex && Boolean(id) && id !== draggingStudentId
+                                      );
+                                      const companions = companionIds
+                                        .map((id) => studentMap.get(id!))
+                                        .filter(Boolean) as Alumno[];
+                                      companionNames = companions.map((c) => c.nombre);
+
+                                      if (companions.length > 0) {
+                                        const draggedAffinities = getStudentAffinities(draggedStudent);
+                                        const draggedIncomps = getStudentIncompatibilities(draggedStudent);
+
+                                        const hasConflict = companions.some(
+                                          (c) =>
+                                            draggedIncomps.includes(c.id) ||
+                                            getStudentIncompatibilities(c).includes(draggedStudent.id)
+                                        );
+                                        const hasAffinity = companions.some(
+                                          (c) =>
+                                            draggedAffinities.includes(c.id) ||
+                                            getStudentAffinities(c).includes(draggedStudent.id)
+                                        );
+
+                                        if (hasConflict) hoverCompatType = 'conflict';
+                                        else if (hasAffinity) hoverCompatType = 'affinity';
+                                        else hoverCompatType = 'neutral';
+                                      } else {
+                                        hoverCompatType = 'neutral';
+                                      }
+                                    }
+                                  }
 
                                   return (
                                     <Droppable key={droppableId} droppableId={droppableId}>
@@ -525,71 +744,139 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                           ref={provided.innerRef}
                                           {...provided.droppableProps}
                                           className={`${seatDimensionClass} rounded-xl border-2 transition-all p-1 flex flex-col items-center justify-center relative flex-shrink-0 ${
-                                            snapshot.isDraggingOver
-                                              ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-300'
+                                            hoverCompatType === 'conflict'
+                                              ? 'border-rose-500 bg-rose-100/90 ring-4 ring-rose-400/50 shadow-md'
+                                              : hoverCompatType === 'affinity'
+                                              ? 'border-emerald-500 bg-emerald-100/90 ring-4 ring-emerald-400/50 shadow-md'
+                                              : isHoverTarget || snapshot.isDraggingOver
+                                              ? 'border-indigo-500 bg-indigo-50 ring-4 ring-indigo-300/40 shadow-sm'
+                                              : isTemporarySwap
+                                              ? 'border-indigo-300 bg-indigo-50/50'
                                               : student
                                               ? 'border-slate-200 bg-white shadow-sm'
                                               : 'border-dashed border-slate-300 bg-white/70 hover:border-indigo-300'
                                           }`}
                                         >
-                                          {student ? (
-                                            <Draggable draggableId={student.id} index={0}>
-                                              {(dragProvided, dragSnapshot) => (
-                                                <div
-                                                  ref={dragProvided.innerRef}
-                                                  {...dragProvided.draggableProps}
-                                                  {...dragProvided.dragHandleProps}
-                                                  className={`w-full h-full flex flex-col justify-between p-0.5 select-none relative ${
-                                                    dragSnapshot.isDragging ? 'opacity-80 scale-105' : ''
-                                                  }`}
-                                                >
-                                                  {/* Botón desalojar puesto (oculto al imprimir) */}
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleUnseat(mesa.id, seatIndex)}
-                                                    className="no-print absolute -top-1 -right-1 w-4 h-4 bg-slate-100 hover:bg-rose-100 hover:text-rose-600 rounded-full text-slate-400 flex items-center justify-center transition-colors"
-                                                    title="Levantar del asiento"
-                                                  >
-                                                    <X className="h-2.5 w-2.5" />
-                                                  </button>
-
-                                                  {/* Nombre del alumno */}
-                                                  <div className="pt-0.5">
-                                                    <div className="font-bold text-[11px] text-slate-800 line-clamp-1 pr-2 leading-tight">
-                                                      {student.nombre}
-                                                    </div>
-                                                    <div className="text-[9px] text-slate-500 line-clamp-1 leading-tight">
-                                                      {student.apellidos}
-                                                    </div>
+                                          {isHoverTarget ? (
+                                            /* Previsualización en vivo en el puesto destino con estado de afinidad o incompatibilidad */
+                                            <div className="flex flex-col items-center justify-center p-1 text-center w-full h-full select-none animate-in fade-in duration-150">
+                                              {hoverCompatType === 'conflict' ? (
+                                                <>
+                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-200/90 px-2 py-0.5 rounded-full shadow-sm">
+                                                    <ShieldAlert className="h-3 w-3 text-rose-600" /> Incompatible
                                                   </div>
-
-                                                  {/* Indicadores de soporte y alertas */}
-                                                  <div className="flex flex-wrap items-center gap-1 mt-auto">
-                                                    <span
-                                                      className={`text-[8px] px-1 py-0.2 rounded font-bold ${
-                                                        student.nivelApoyo === 'Ordinario'
-                                                          ? 'bg-slate-100 text-slate-600'
-                                                          : student.nivelApoyo === 'Nivel II'
-                                                          ? 'bg-yellow-100 text-yellow-800'
-                                                          : student.nivelApoyo === 'Nivel III'
-                                                          ? 'bg-orange-100 text-orange-800'
-                                                          : 'bg-rose-100 text-rose-800'
-                                                      }`}
-                                                    >
-                                                      {student.nivelApoyo}
-                                                    </span>
-
-                                                    {isFrontRowWarning && (
-                                                      <span
-                                                        className="text-[8px] px-1 rounded bg-amber-100 text-amber-800 flex items-center"
-                                                        title="Requiere 1ª fila"
-                                                      >
-                                                        <Eye className="h-2 w-2 text-amber-600 mr-0.5" /> 1ªF
-                                                      </span>
-                                                    )}
+                                                  <span className="text-[9px] text-rose-700 font-semibold line-clamp-1 mt-1">
+                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
+                                                  </span>
+                                                </>
+                                              ) : hoverCompatType === 'affinity' ? (
+                                                <>
+                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-200/90 px-2 py-0.5 rounded-full shadow-sm">
+                                                    <Heart className="h-3 w-3 fill-emerald-500 text-emerald-600" /> Afinidad
                                                   </div>
-                                                </div>
+                                                  <span className="text-[9px] text-emerald-700 font-semibold line-clamp-1 mt-1">
+                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
+                                                  </span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <div className="text-[10px] font-bold text-indigo-700 flex items-center gap-1">
+                                                    <ArrowDownUp className="h-3 w-3 text-indigo-600" />
+                                                    {dragSourceId?.startsWith('mesa-') ? 'Intercambiar' : 'Asignar aquí'}
+                                                  </div>
+                                                  <span className="text-[9px] text-indigo-500 font-medium line-clamp-1 mt-0.5">
+                                                    {companionNames.length > 0
+                                                      ? `junto a ${companionNames.join(', ')}`
+                                                      : 'Puesto libre'}
+                                                  </span>
+                                                </>
                                               )}
+                                            </div>
+                                          ) : student ? (
+                                            <Draggable draggableId={student.id} index={0}>
+                                              {(dragProvided, dragSnapshot) => {
+                                                const isThisDragged = dragSnapshot.isDragging;
+                                                const cardContent = (
+                                                  <div
+                                                    ref={dragProvided.innerRef}
+                                                    {...dragProvided.draggableProps}
+                                                    {...dragProvided.dragHandleProps}
+                                                    style={{
+                                                      ...dragProvided.draggableProps.style,
+                                                      ...(isThisDragged ? { width: '112px', height: '90px', zIndex: 9999 } : {})
+                                                    }}
+                                                    className={`w-full h-full flex flex-col justify-between p-1 select-none relative rounded-xl transition-all ${
+                                                      isThisDragged
+                                                        ? 'bg-white shadow-2xl border-2 border-indigo-500 ring-4 ring-indigo-400/40 pointer-events-none cursor-grabbing opacity-95'
+                                                        : isTemporarySwap
+                                                        ? 'bg-indigo-50/70 border border-indigo-200'
+                                                        : ''
+                                                    }`}
+                                                  >
+                                                    {/* Botón desalojar puesto (oculto al imprimir y al arrastrar) */}
+                                                    {!isThisDragged && (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleUnseat(mesa.id, seatIndex)}
+                                                        className="no-print absolute -top-1 -right-1 w-4 h-4 bg-slate-100 hover:bg-rose-100 hover:text-rose-600 rounded-full text-slate-400 flex items-center justify-center transition-colors"
+                                                        title="Levantar del asiento"
+                                                      >
+                                                        <X className="h-2.5 w-2.5" />
+                                                      </button>
+                                                    )}
+
+                                                    {/* Nombre del alumno */}
+                                                    <div className="pt-0.5">
+                                                      <div className="font-bold text-[11px] text-slate-800 line-clamp-1 pr-2 leading-tight">
+                                                        {student.nombre}
+                                                      </div>
+                                                      <div className="text-[9px] text-slate-500 line-clamp-1 leading-tight">
+                                                        {student.apellidos}
+                                                      </div>
+                                                    </div>
+
+                                                    {/* Indicador de intercambio temporal si aplica */}
+                                                    {isTemporarySwap && (
+                                                      <div className="my-auto">
+                                                        <span className="text-[8px] px-1 py-0.2 rounded font-bold bg-indigo-100 text-indigo-700 flex items-center gap-0.5 w-fit">
+                                                          <ArrowDownUp className="h-2 w-2" /> Intercambio
+                                                        </span>
+                                                      </div>
+                                                    )}
+
+                                                    {/* Indicadores de soporte y alertas */}
+                                                    <div className="flex flex-wrap items-center gap-1 mt-auto">
+                                                      <span
+                                                        className={`text-[8px] px-1 py-0.2 rounded font-bold ${
+                                                          student.nivelApoyo === 'Ordinario'
+                                                            ? 'bg-slate-100 text-slate-600'
+                                                            : student.nivelApoyo === 'Nivel II'
+                                                            ? 'bg-yellow-100 text-yellow-800'
+                                                            : student.nivelApoyo === 'Nivel III'
+                                                            ? 'bg-orange-100 text-orange-800'
+                                                            : 'bg-rose-100 text-rose-800'
+                                                        }`}
+                                                      >
+                                                        {student.nivelApoyo}
+                                                      </span>
+
+                                                      {isFrontRowWarning && (
+                                                        <span
+                                                          className="text-[8px] px-1 rounded bg-amber-100 text-amber-800 flex items-center"
+                                                          title="Requiere 1ª fila"
+                                                        >
+                                                          <Eye className="h-2 w-2 text-amber-600 mr-0.5" /> 1ªF
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                );
+
+                                                if (isThisDragged) {
+                                                  return createPortal(cardContent, document.body);
+                                                }
+                                                return cardContent;
+                                              }}
                                             </Draggable>
                                           ) : (
                                             <div className="text-center text-slate-400 select-none pointer-events-none">

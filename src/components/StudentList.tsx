@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { StudentModal } from './StudentModal';
 import { ExcelImportModal } from './ExcelImportModal';
-import { getStudentAffinities, getStudentEnmities } from '../lib/aulaGenerator';
+import { getStudentAffinities, getStudentIncompatibilities } from '../lib/aulaGenerator';
 
 interface StudentListProps {
   alumnos: Alumno[];
@@ -57,14 +57,14 @@ export const StudentList: React.FC<StudentListProps> = ({
 
   const handleDeleteAlumno = (id: string) => {
     if (window.confirm('¿Seguro que deseas eliminar a este alumno?')) {
-      // Remover al alumno y también las referencias a su ID en afinidades y enemistades
+      // Remover al alumno y también las referencias a su ID en afinidades y incompatibilidades
       setAlumnos((prev) =>
         prev
           .filter((a) => a.id !== id)
           .map((a) => ({
             ...a,
             afinidades: getStudentAffinities(a).filter((fid) => fid !== id),
-            enemistades: getStudentEnmities(a).filter((eid) => eid !== id),
+            incompatibilidades: getStudentIncompatibilities(a).filter((eid) => eid !== id),
           }))
       );
     }
@@ -83,18 +83,18 @@ export const StudentList: React.FC<StudentListProps> = ({
 
   const handleLoadDemoData = () => {
     const demo: Alumno[] = [
-      { id: 'a1', nombre: 'Ana', apellidos: 'García', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a2'], enemistades: ['a5'] },
-      { id: 'a2', nombre: 'Carlos', apellidos: 'López', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['a1'], enemistades: [] },
-      { id: 'a3', nombre: 'María', apellidos: 'Martínez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a4'], enemistades: [] },
-      { id: 'a4', nombre: 'Juan', apellidos: 'Pérez', nivelApoyo: 'Nivel III', necesitaPrimeraFila: true, afinidades: ['a3'], enemistades: ['a6'] },
-      { id: 'a5', nombre: 'Elena', apellidos: 'Ruiz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a6'], enemistades: ['a1'] },
-      { id: 'a6', nombre: 'David', apellidos: 'Sánchez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a5'], enemistades: ['a4'] },
-      { id: 'a7', nombre: 'Lucía', apellidos: 'Gómez', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['a8'], enemistades: [] },
-      { id: 'a8', nombre: 'Mateo', apellidos: 'Díaz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a7'], enemistades: [] },
-      { id: 'a9', nombre: 'Sara', apellidos: 'Torres', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a10'], enemistades: [] },
-      { id: 'a10', nombre: 'Hugo', apellidos: 'Vega', nivelApoyo: 'Nivel IV', necesitaPrimeraFila: true, afinidades: ['a9'], enemistades: ['a11'] },
-      { id: 'a11', nombre: 'Irene', apellidos: 'Morales', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], enemistades: ['a10'] },
-      { id: 'a12', nombre: 'Pablo', apellidos: 'Navarro', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], enemistades: [] },
+      { id: 'a1', nombre: 'Ana', apellidos: 'García', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a2'], incompatibilidades: ['a5'] },
+      { id: 'a2', nombre: 'Carlos', apellidos: 'López', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['a1'], incompatibilidades: [] },
+      { id: 'a3', nombre: 'María', apellidos: 'Martínez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a4'], incompatibilidades: [] },
+      { id: 'a4', nombre: 'Juan', apellidos: 'Pérez', nivelApoyo: 'Nivel III', necesitaPrimeraFila: true, afinidades: ['a3'], incompatibilidades: ['a6'] },
+      { id: 'a5', nombre: 'Elena', apellidos: 'Ruiz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a6'], incompatibilidades: ['a1'] },
+      { id: 'a6', nombre: 'David', apellidos: 'Sánchez', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a5'], incompatibilidades: ['a4'] },
+      { id: 'a7', nombre: 'Lucía', apellidos: 'Gómez', nivelApoyo: 'Nivel II', necesitaPrimeraFila: true, afinidades: ['a8'], incompatibilidades: [] },
+      { id: 'a8', nombre: 'Mateo', apellidos: 'Díaz', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a7'], incompatibilidades: [] },
+      { id: 'a9', nombre: 'Sara', apellidos: 'Torres', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: ['a10'], incompatibilidades: [] },
+      { id: 'a10', nombre: 'Hugo', apellidos: 'Vega', nivelApoyo: 'Nivel IV', necesitaPrimeraFila: true, afinidades: ['a9'], incompatibilidades: ['a11'] },
+      { id: 'a11', nombre: 'Irene', apellidos: 'Morales', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], incompatibilidades: ['a10'] },
+      { id: 'a12', nombre: 'Pablo', apellidos: 'Navarro', nivelApoyo: 'Ordinario', necesitaPrimeraFila: false, afinidades: [], incompatibilidades: [] },
     ];
     setAlumnos(demo);
   };
@@ -122,7 +122,7 @@ export const StudentList: React.FC<StudentListProps> = ({
               <div>
                 <h2 className="text-2xl font-bold text-slate-800">Lista de Alumnos</h2>
                 <p className="text-sm text-slate-500">
-                  Gestiona las columnas de datos: Nombres, Nivel de apoyo, Afinidades y Enemistades.
+                  Gestiona las columnas de datos: Nombres, Nivel de apoyo, Afinidades e Incompatibilidades.
                 </p>
               </div>
             </div>
@@ -219,7 +219,7 @@ export const StudentList: React.FC<StudentListProps> = ({
                   <th className="py-3.5 px-4">
                     <span className="flex items-center gap-1.5 text-rose-700">
                       <ShieldAlert className="h-3.5 w-3.5 text-rose-600" />
-                      Enemistades / Incompatibles
+                      Incompatibilidades
                     </span>
                   </th>
                   <th className="py-3.5 px-4 text-right">Acciones</th>
@@ -263,7 +263,7 @@ export const StudentList: React.FC<StudentListProps> = ({
                 ) : (
                   filteredAlumnos.map((alumno) => {
                     const affinities = getStudentAffinities(alumno);
-                    const enmities = getStudentEnmities(alumno);
+                    const enmities = getStudentIncompatibilities(alumno);
 
                     return (
                       <tr
@@ -336,7 +336,7 @@ export const StudentList: React.FC<StudentListProps> = ({
                           )}
                         </td>
 
-                        {/* Columna: Enemistades */}
+                        {/* Columna: Incompatibilidades */}
                         <td className="py-3.5 px-4">
                           {enmities.length === 0 ? (
                             <span className="text-xs text-slate-400 italic">Ninguna</span>

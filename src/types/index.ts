@@ -7,9 +7,9 @@ export interface Alumno {
   nivelApoyo: NivelApoyo;
   necesitaPrimeraFila: boolean;
   afinidades: string[]; // IDs de alumnos con los que conviene sentarse
-  enemistades: string[]; // IDs de alumnos con los que NO debe sentarse
+  incompatibilidades: string[]; // IDs de alumnos con los que NO debe sentarse
   afinidadId?: string; // Retrocompatibilidad
-  enemistadId?: string; // Retrocompatibilidad
+  incompatibilidadId?: string; // Retrocompatibilidad
   notas?: string;
 }
 
