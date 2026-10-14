@@ -193,7 +193,28 @@ export function getStudentIncompatibilities(alumno: Alumno): string[] {
  * 2. Evitar incompatibilidades en la misma mesa
  * 3. Fomentar afinidades en la misma mesa
  */
-export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
+// Helper para barajar determinísticamente según la variante seleccionada
+function shuffleWithSeed<T>(array: T[], seed: number): T[] {
+  const result = [...array];
+  if (seed === 0) return result;
+  let s = (seed + 1) * 1103515245 + 12345;
+  for (let i = result.length - 1; i > 0; i--) {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    const j = s % (i + 1);
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+/**
+ * Algoritmo inteligente de distribución de alumnos en mesas respetando:
+ * 1. Necesidad de primera fila -> mesas de fila 0
+ * 2. Evitar incompatibilidades en la misma mesa
+ * 3. Fomentar afinidades en la misma mesa
+ * 
+ * @param variant - Índice de variación para rotar entre diferentes disposiciones válidas
+ */
+export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[], variant: number = 0): Mesa[] {
   // Clona las mesas con asientos limpios
   const newMesas: Mesa[] = mesas.map((m) => ({
     ...m,
@@ -222,8 +243,14 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
   }
 
   // 1. Asignar alumnos que necesitan primera fila a mesas con fila === 0
-  const frontRowStudents = unassigned.filter((a) => a.necesitaPrimeraFila);
-  const frontMesas = newMesas.filter((m) => m.fila === 0);
+  const frontRowStudents = shuffleWithSeed(
+    unassigned.filter((a) => a.necesitaPrimeraFila),
+    variant * 3 + 1
+  );
+  const frontMesas = shuffleWithSeed(
+    newMesas.filter((m) => m.fila === 0),
+    variant * 5 + 2
+  );
 
   for (const student of frontRowStudents) {
     let placed = false;
@@ -239,7 +266,8 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
     }
     if (!placed) {
       // Si no cupo en fila 0, intentar cualquier mesa con hueco
-      for (const mesa of newMesas) {
+      const allMesasShuffled = shuffleWithSeed(newMesas, variant + 7);
+      for (const mesa of allMesasShuffled) {
         const freeIndex = mesa.alumnoIds.indexOf(null);
         if (freeIndex !== -1 && canSitTogether(student, mesa.alumnoIds)) {
           mesa.alumnoIds[freeIndex] = student.id;
@@ -255,17 +283,21 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
   const remaining = [...unassigned];
   remaining.sort((a, b) => {
     // Ordenar con prioridad a los que tienen afinidades declaradas
-    return getStudentAffinities(b).length - getStudentAffinities(a).length;
+    const diff = getStudentAffinities(b).length - getStudentAffinities(a).length;
+    if (diff !== 0) return diff;
+    // Si tienen mismas afinidades, barajar según la variante
+    return ((variant * 17 + a.id.charCodeAt(0)) % 5) - 2;
   });
 
   for (const student of remaining) {
     if (!unassigned.some((u) => u.id === student.id)) continue; // ya asignado
 
-    const affinities = getStudentAffinities(student);
+    const affinities = shuffleWithSeed(getStudentAffinities(student), variant + 4);
     let placed = false;
 
     // Buscar si algún amigo ya está sentado en una mesa con espacio disponible
-    for (const mesa of newMesas) {
+    const candidateMesasForFriend = shuffleWithSeed(newMesas, variant + 11);
+    for (const mesa of candidateMesasForFriend) {
       const freeIndex = mesa.alumnoIds.indexOf(null);
       if (freeIndex === -1) continue;
 
@@ -285,7 +317,8 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
       if (friendId) {
         const friend = unassigned.find((u) => u.id === friendId)!;
         // Buscar mesa con al menos 2 huecos libres
-        const targetMesa = newMesas.find((m) => {
+        const emptyMesas = shuffleWithSeed(newMesas, variant + 19);
+        const targetMesa = emptyMesas.find((m) => {
           const emptyCount = m.alumnoIds.filter((id) => id === null).length;
           return emptyCount >= 2 && canSitTogether(student, m.alumnoIds) && canSitTogether(friend, m.alumnoIds);
         });
@@ -305,10 +338,11 @@ export function autoAssignStudents(alumnos: Alumno[], mesas: Mesa[]): Mesa[] {
   }
 
   // 3. Sentar al resto de alumnos en cualquier espacio disponible evitando enemigos
-  const stillUnassigned = [...unassigned];
+  const stillUnassigned = shuffleWithSeed([...unassigned], variant * 7 + 13);
   for (const student of stillUnassigned) {
     let placed = false;
-    for (const mesa of newMesas) {
+    const mesasForStudent = shuffleWithSeed(newMesas, variant * 11 + 23);
+    for (const mesa of mesasForStudent) {
       const freeIndex = mesa.alumnoIds.indexOf(null);
       if (freeIndex !== -1 && canSitTogether(student, mesa.alumnoIds)) {
         mesa.alumnoIds[freeIndex] = student.id;

@@ -77,8 +77,8 @@
 
 @media print {
   @page {
-    size: landscape;
-    margin: 8mm;
+    size: auto;
+    margin: 6mm;
   }
 
   html, body {
@@ -112,6 +112,11 @@
     border: 1px solid #94a3b8 !important;
     padding: 10px !important;
     page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  body.print-portrait .print-canvas {
+    zoom: 0.92;
   }
 }
 

@@ -13,6 +13,7 @@ import {
   X, 
   CheckCircle2,
   Printer,
+  FileText,
   ZoomIn,
   ZoomOut,
   LayoutGrid,
@@ -43,6 +44,7 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
 }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const [zoomPercent, setZoomPercent] = useState<number>(100);
+  const [autoAssignVariant, setAutoAssignVariant] = useState<number>(0);
   const [draggingStudentId, setDraggingStudentId] = useState<string | null>(null);
   const [dragSourceId, setDragSourceId] = useState<string | null>(null);
   const [dragHoverTarget, setDragHoverTarget] = useState<string | null>(null);
@@ -100,6 +102,17 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
     return cloned;
   }, [aula.mesas, draggingStudentId, dragSourceId, dragHoverTarget]);
 
+  // Estudiante en el puesto de destino sobre el que se hace hover (para previsualizar intercambio en el origen)
+  const hoveredTargetStudent = useMemo(() => {
+    if (!draggingStudentId || !dragHoverTarget || !dragHoverTarget.startsWith('mesa-')) return null;
+    const parts = dragHoverTarget.split('-seat-');
+    const tMesa = aula.mesas.find((m) => m.id === parts[0]);
+    if (!tMesa) return null;
+    const tSeatIndex = parseInt(parts[1], 10);
+    const tStudentId = tMesa.alumnoIds[tSeatIndex];
+    return tStudentId ? studentMap.get(tStudentId) : null;
+  }, [draggingStudentId, dragHoverTarget, aula.mesas, studentMap]);
+
   // Análisis de conflictos y afinidades en tiempo real considerando la previsualización
   const issues = useMemo(() => {
     return checkClassroomIssues(alumnos, previewMesas);
@@ -132,51 +145,54 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
     }
 
     const studentId = draggableId;
-    const newMesas: Mesa[] = aula.mesas.map((m) => ({
-      ...m,
-      alumnoIds: [...m.alumnoIds],
-    }));
 
-    // 1. Si venía de un asiento en una mesa, vaciar ese asiento
-    if (source.droppableId.startsWith('mesa-')) {
-      const parts = source.droppableId.split('-seat-');
-      const mesaId = parts[0];
-      const seatIndex = parseInt(parts[1], 10);
-      const sourceMesa = newMesas.find((m) => m.id === mesaId);
-      if (sourceMesa) {
-        sourceMesa.alumnoIds[seatIndex] = null;
+    setAula((prev) => {
+      const newMesas: Mesa[] = prev.mesas.map((m) => ({
+        ...m,
+        alumnoIds: [...m.alumnoIds],
+      }));
+
+      // 1. Si venía de un asiento en una mesa, vaciar ese asiento
+      if (source.droppableId.startsWith('mesa-')) {
+        const parts = source.droppableId.split('-seat-');
+        const mesaId = parts[0];
+        const seatIndex = parseInt(parts[1], 10);
+        const sourceMesa = newMesas.find((m) => m.id === mesaId);
+        if (sourceMesa) {
+          sourceMesa.alumnoIds[seatIndex] = null;
+        }
       }
-    }
 
-    // 2. Si se soltó en un asiento de una mesa
-    if (destination.droppableId.startsWith('mesa-')) {
-      const parts = destination.droppableId.split('-seat-');
-      const targetMesaId = parts[0];
-      const targetSeatIndex = parseInt(parts[1], 10);
-      const targetMesa = newMesas.find((m) => m.id === targetMesaId);
+      // 2. Si se soltó en un asiento de una mesa
+      if (destination.droppableId.startsWith('mesa-')) {
+        const parts = destination.droppableId.split('-seat-');
+        const targetMesaId = parts[0];
+        const targetSeatIndex = parseInt(parts[1], 10);
+        const targetMesa = newMesas.find((m) => m.id === targetMesaId);
 
-      if (targetMesa) {
-        // Intercambiar si ya había un alumno sentado
-        const existingStudentId = targetMesa.alumnoIds[targetSeatIndex];
-        targetMesa.alumnoIds[targetSeatIndex] = studentId;
+        if (targetMesa) {
+          // Intercambiar si ya había un alumno sentado
+          const existingStudentId = targetMesa.alumnoIds[targetSeatIndex];
+          targetMesa.alumnoIds[targetSeatIndex] = studentId;
 
-        // Si venía de otra mesa, colocamos al existente en el hueco que quedó libre
-        if (source.droppableId.startsWith('mesa-') && existingStudentId) {
-          const partsSrc = source.droppableId.split('-seat-');
-          const sourceMesaId = partsSrc[0];
-          const sourceSeatIndex = parseInt(partsSrc[1], 10);
-          const sourceMesa = newMesas.find((m) => m.id === sourceMesaId);
-          if (sourceMesa) {
-            sourceMesa.alumnoIds[sourceSeatIndex] = existingStudentId;
+          // Si venía de otra mesa, colocamos al existente en el hueco que quedó libre
+          if (source.droppableId.startsWith('mesa-') && existingStudentId) {
+            const partsSrc = source.droppableId.split('-seat-');
+            const sourceMesaId = partsSrc[0];
+            const sourceSeatIndex = parseInt(partsSrc[1], 10);
+            const sourceMesa = newMesas.find((m) => m.id === sourceMesaId);
+            if (sourceMesa) {
+              sourceMesa.alumnoIds[sourceSeatIndex] = existingStudentId;
+            }
           }
         }
       }
-    }
 
-    setAula((prev) => ({
-      ...prev,
-      mesas: newMesas,
-    }));
+      return {
+        ...prev,
+        mesas: newMesas,
+      };
+    });
   };
 
   // Desasignar un alumno específico de su mesa
@@ -207,34 +223,78 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
     }
   };
 
-  // Asignación automática inteligente
+  // Asignación automática inteligente rotativa (explora diferentes disposiciones válidas con cada clic)
   const handleAutoAssign = () => {
-    const assignedMesas = autoAssignStudents(alumnos, aula.mesas);
+    const nextVariant = autoAssignVariant + 1;
+    setAutoAssignVariant(nextVariant);
+    const assignedMesas = autoAssignStudents(alumnos, aula.mesas, nextVariant);
     setAula((prev) => ({
       ...prev,
       mesas: assignedMesas,
     }));
   };
 
-  // Imprimir / Exportar a PDF
-  const handlePrintPdf = () => {
+  // Imprimir / Exportar a PDF con soporte para Vertical (evita cortes de filas) u Horizontal
+  const handlePrintPdf = (orientation: 'portrait' | 'landscape' = 'portrait') => {
+    let styleEl = document.getElementById('print-orientation-style') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'print-orientation-style';
+      document.head.appendChild(styleEl);
+    }
+    styleEl.innerHTML = `@media print { @page { size: ${orientation}; margin: 6mm; } }`;
+
+    document.body.classList.remove('print-portrait', 'print-landscape');
+    document.body.classList.add(`print-${orientation}`);
+
     window.print();
   };
 
-  // Exportar como imagen (PNG o JPG)
+  // Exportar como imagen (PNG o JPG) en ultra alta definición con textos nítidos sin cortes
   const handleExportImage = async (format: 'png' | 'jpeg' = 'png') => {
     const canvasElement = document.getElementById('seating-canvas-export');
     if (!canvasElement) return;
 
     try {
+      if (document.fonts) {
+        await document.fonts.ready;
+      }
+
       const canvas = await html2canvas(canvasElement, {
-        scale: 2,
+        scale: 3, // 3x ultra alta definición para máxima nitidez
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
+        onclone: (clonedDoc) => {
+          const el = clonedDoc.getElementById('seating-canvas-export');
+          if (el) {
+            // Eliminar zoom o transform en el elemento clonado
+            el.style.zoom = '1';
+            el.style.transform = 'none';
+
+            // Ajustar textos para que html2canvas nunca recorte ningún carácter
+            const textNodes = el.querySelectorAll('.truncate, .line-clamp-1, .line-clamp-2, [class*="line-clamp"]');
+            textNodes.forEach((node) => {
+              const h = node as HTMLElement;
+              h.style.overflow = 'visible';
+              h.style.display = 'block';
+              h.style.webkitLineClamp = 'unset';
+              h.style.whiteSpace = 'nowrap';
+              h.style.lineHeight = '1.35';
+              h.style.paddingBottom = '3px';
+            });
+
+            const allElements = el.querySelectorAll('*');
+            allElements.forEach((node) => {
+              const h = node as HTMLElement;
+              h.style.textRendering = 'geometricPrecision';
+            });
+          }
+        },
       });
+
       const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-      const dataUrl = canvas.toDataURL(mimeType, 0.95);
+      const dataUrl = canvas.toDataURL(mimeType, 0.98);
       const link = document.createElement('a');
       const aulaName = (aula.nombre || 'aula').toLowerCase().replace(/\s+/g, '-');
       link.download = `plano-asientos-${aulaName}.${format === 'jpeg' ? 'jpg' : 'png'}`;
@@ -296,9 +356,9 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
     });
   };
 
-  // Agrupar mesas por filas para renderizado organizado (usando mesas previsualizadas durante drag)
+  // Agrupar mesas por filas para renderizado organizado (usando aula.mesas para estabilidad del DOM en DnD)
   const filasArray: Mesa[][] = [];
-  previewMesas.forEach((mesa) => {
+  aula.mesas.forEach((mesa) => {
     const r = mesa.fila ?? 0;
     if (!filasArray[r]) filasArray[r] = [];
     filasArray[r].push(mesa);
@@ -393,10 +453,15 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
           <button
             onClick={handleAutoAssign}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
-            title="Distribuye automáticamente respetando 1ª fila, juntando afinidades y separando incompatibilidades"
+            title="Distribución automática inteligente. Cada clic explora y rota entre diferentes disposiciones válidas."
           >
             <Sparkles className="h-4 w-4" />
-            Distribución Automática Inteligente
+            <span>Distribución Automática</span>
+            {autoAssignVariant > 0 && (
+              <span className="bg-indigo-900/90 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold ml-0.5">
+                #{autoAssignVariant}
+              </span>
+            )}
           </button>
           
           <button
@@ -420,7 +485,7 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
           <button
             onClick={() => handleExportImage('png')}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 rounded-xl text-xs font-semibold shadow-sm transition-all"
-            title="Exportar plano en imagen de alta resolución (PNG)"
+            title="Exportar plano en imagen de ultra alta resolución (PNG)"
           >
             <Image className="h-3.5 w-3.5 text-blue-600" />
             Exportar PNG
@@ -435,14 +500,23 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
             Exportar JPG
           </button>
 
-          {/* Botón Imprimir en PDF */}
+          {/* Botones Imprimir en PDF: Vertical (evita cortes de fila) y Horizontal */}
           <button
-            onClick={handlePrintPdf}
+            onClick={() => handlePrintPdf('portrait')}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
-            title="Imprimir plano de asientos o guardar como documento PDF"
+            title="Imprimir plano en formato vertical (A4) - Evita cortes y muestra todas las filas completas"
           >
-            <Printer className="h-4 w-4 text-emerald-400" />
-            Imprimir / Guardar en PDF
+            <FileText className="h-3.5 w-3.5 text-emerald-400" />
+            Imprimir PDF (Vertical)
+          </button>
+
+          <button
+            onClick={() => handlePrintPdf('landscape')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-medium transition-all"
+            title="Imprimir plano en formato horizontal (Apaisado)"
+          >
+            <Printer className="h-3.5 w-3.5 text-slate-500" />
+            Horizontal
           </button>
         </div>
       </div>
@@ -515,9 +589,10 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                 {...provided.dragHandleProps}
                                 style={{
                                   ...provided.draggableProps.style,
-                                  ...(isThisDragged ? { width: '280px', zIndex: 9999 } : {})
+                                  ...(isThisDragged ? { width: '280px', zIndex: 9999 } : {}),
+                                  ...(dragSnapshot.isDropAnimating ? { transitionDuration: '0.001s' } : {})
                                 }}
-                                className={`p-2.5 rounded-xl border transition-all select-none ${
+                                className={`p-2.5 rounded-xl border select-none ${
                                   isThisDragged
                                     ? 'bg-white border-indigo-500 shadow-2xl ring-4 ring-indigo-400/30 opacity-95 pointer-events-none cursor-grabbing'
                                     : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'
@@ -695,7 +770,6 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
 
                                   // Estudiante actual en este puesto (según la previsualización de mesas)
                                   const student = studentId ? studentMap.get(studentId) : null;
-                                  const isTemporarySwap = isSourceSeat && Boolean(student && student.id !== draggingStudentId);
                                   const isFrontRowWarning = student?.necesitaPrimeraFila && mesa.fila > 0;
 
                                   // Datos de compatibilidad para la zona de drop mientras se arrastra
@@ -743,56 +817,20 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                         <div
                                           ref={provided.innerRef}
                                           {...provided.droppableProps}
-                                          className={`${seatDimensionClass} rounded-xl border-2 transition-all p-1 flex flex-col items-center justify-center relative flex-shrink-0 ${
+                                          className={`${seatDimensionClass} rounded-xl border-2 p-1 flex flex-col items-center justify-center relative flex-shrink-0 transition-colors ${
                                             hoverCompatType === 'conflict'
-                                              ? 'border-rose-500 bg-rose-100/90 ring-4 ring-rose-400/50 shadow-md'
+                                              ? 'border-rose-500 bg-rose-50 ring-2 ring-rose-400/50'
                                               : hoverCompatType === 'affinity'
-                                              ? 'border-emerald-500 bg-emerald-100/90 ring-4 ring-emerald-400/50 shadow-md'
+                                              ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-400/50'
                                               : isHoverTarget || snapshot.isDraggingOver
-                                              ? 'border-indigo-500 bg-indigo-50 ring-4 ring-indigo-300/40 shadow-sm'
-                                              : isTemporarySwap
-                                              ? 'border-indigo-300 bg-indigo-50/50'
+                                              ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-300/50'
                                               : student
-                                              ? 'border-slate-200 bg-white shadow-sm'
+                                              ? 'border-slate-200 bg-white shadow-xs'
                                               : 'border-dashed border-slate-300 bg-white/70 hover:border-indigo-300'
                                           }`}
                                         >
-                                          {isHoverTarget ? (
-                                            /* Previsualización en vivo en el puesto destino con estado de afinidad o incompatibilidad */
-                                            <div className="flex flex-col items-center justify-center p-1 text-center w-full h-full select-none animate-in fade-in duration-150">
-                                              {hoverCompatType === 'conflict' ? (
-                                                <>
-                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-200/90 px-2 py-0.5 rounded-full shadow-sm">
-                                                    <ShieldAlert className="h-3 w-3 text-rose-600" /> Incompatible
-                                                  </div>
-                                                  <span className="text-[9px] text-rose-700 font-semibold line-clamp-1 mt-1">
-                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
-                                                  </span>
-                                                </>
-                                              ) : hoverCompatType === 'affinity' ? (
-                                                <>
-                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-200/90 px-2 py-0.5 rounded-full shadow-sm">
-                                                    <Heart className="h-3 w-3 fill-emerald-500 text-emerald-600" /> Afinidad
-                                                  </div>
-                                                  <span className="text-[9px] text-emerald-700 font-semibold line-clamp-1 mt-1">
-                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
-                                                  </span>
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <div className="text-[10px] font-bold text-indigo-700 flex items-center gap-1">
-                                                    <ArrowDownUp className="h-3 w-3 text-indigo-600" />
-                                                    {dragSourceId?.startsWith('mesa-') ? 'Intercambiar' : 'Asignar aquí'}
-                                                  </div>
-                                                  <span className="text-[9px] text-indigo-500 font-medium line-clamp-1 mt-0.5">
-                                                    {companionNames.length > 0
-                                                      ? `junto a ${companionNames.join(', ')}`
-                                                      : 'Puesto libre'}
-                                                  </span>
-                                                </>
-                                              )}
-                                            </div>
-                                          ) : student ? (
+                                          {/* Alumno en el asiento si existe */}
+                                          {student ? (
                                             <Draggable draggableId={student.id} index={0}>
                                               {(dragProvided, dragSnapshot) => {
                                                 const isThisDragged = dragSnapshot.isDragging;
@@ -803,13 +841,12 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                                     {...dragProvided.dragHandleProps}
                                                     style={{
                                                       ...dragProvided.draggableProps.style,
-                                                      ...(isThisDragged ? { width: '112px', height: '90px', zIndex: 9999 } : {})
+                                                      ...(isThisDragged ? { width: '112px', height: '90px', zIndex: 9999 } : {}),
+                                                      ...(dragSnapshot.isDropAnimating ? { transitionDuration: '0.001s' } : {})
                                                     }}
-                                                    className={`w-full h-full flex flex-col justify-between p-1 select-none relative rounded-xl transition-all ${
+                                                    className={`w-full h-full flex flex-col justify-between p-1 select-none relative rounded-xl ${
                                                       isThisDragged
                                                         ? 'bg-white shadow-2xl border-2 border-indigo-500 ring-4 ring-indigo-400/40 pointer-events-none cursor-grabbing opacity-95'
-                                                        : isTemporarySwap
-                                                        ? 'bg-indigo-50/70 border border-indigo-200'
                                                         : ''
                                                     }`}
                                                   >
@@ -825,24 +862,15 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                                       </button>
                                                     )}
 
-                                                    {/* Nombre del alumno */}
-                                                    <div className="pt-0.5">
-                                                      <div className="font-bold text-[11px] text-slate-800 line-clamp-1 pr-2 leading-tight">
+                                                    {/* Nombre del alumno con soporte para nombres largos y sin recortes */}
+                                                    <div className="pt-0.5 w-full overflow-hidden">
+                                                      <div className="font-bold text-[11px] text-slate-800 truncate leading-snug pb-0.5" title={student.nombre}>
                                                         {student.nombre}
                                                       </div>
-                                                      <div className="text-[9px] text-slate-500 line-clamp-1 leading-tight">
+                                                      <div className="text-[9px] text-slate-500 truncate leading-snug pb-0.5" title={student.apellidos}>
                                                         {student.apellidos}
                                                       </div>
                                                     </div>
-
-                                                    {/* Indicador de intercambio temporal si aplica */}
-                                                    {isTemporarySwap && (
-                                                      <div className="my-auto">
-                                                        <span className="text-[8px] px-1 py-0.2 rounded font-bold bg-indigo-100 text-indigo-700 flex items-center gap-0.5 w-fit">
-                                                          <ArrowDownUp className="h-2 w-2" /> Intercambio
-                                                        </span>
-                                                      </div>
-                                                    )}
 
                                                     {/* Indicadores de soporte y alertas */}
                                                     <div className="flex flex-wrap items-center gap-1 mt-auto">
@@ -884,6 +912,74 @@ export const SeatingCanvas: React.FC<SeatingCanvasProps> = ({
                                               <div className="text-[8px] text-slate-300">Vacío</div>
                                             </div>
                                           )}
+
+                                          {/* Previsualización en el puesto de origen del alumno con el que se intercambia */}
+                                          {isSourceSeat && hoveredTargetStudent && (
+                                            <div className="absolute inset-0 z-10 pointer-events-none rounded-xl bg-indigo-50/95 border-2 border-dashed border-indigo-400 flex flex-col justify-between p-1 select-none animate-in fade-in duration-100">
+                                              <div className="pt-0.5 w-full overflow-hidden">
+                                                <div className="font-bold text-[11px] text-indigo-950 truncate leading-snug">
+                                                  {hoveredTargetStudent.nombre}
+                                                </div>
+                                                <div className="text-[9px] text-indigo-700 truncate leading-snug">
+                                                  {hoveredTargetStudent.apellidos}
+                                                </div>
+                                              </div>
+                                              <div className="my-auto flex justify-center">
+                                                <span className="text-[8px] px-1.5 py-0.5 rounded font-bold bg-indigo-200 text-indigo-800 flex items-center gap-0.5">
+                                                  <ArrowDownUp className="h-2 w-2" /> Intercambio
+                                                </span>
+                                              </div>
+                                              <div className="text-[8px] font-medium text-indigo-600 truncate text-center">
+                                                {hoveredTargetStudent.nivelApoyo}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {/* Overlay de compatibilidad / swap en el puesto destino (sin desmontar el Draggable subyacente) */}
+                                          {isHoverTarget && (
+                                            <div className={`absolute inset-0 z-20 pointer-events-none rounded-xl flex flex-col items-center justify-center p-1 text-center border-2 shadow-sm animate-in fade-in duration-100 ${
+                                              hoverCompatType === 'conflict'
+                                                ? 'bg-rose-100/95 border-rose-400 text-rose-900'
+                                                : hoverCompatType === 'affinity'
+                                                ? 'bg-emerald-100/95 border-emerald-400 text-emerald-900'
+                                                : 'bg-indigo-100/95 border-indigo-400 text-indigo-900'
+                                            }`}>
+                                              {hoverCompatType === 'conflict' ? (
+                                                <>
+                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-800 bg-rose-200/90 px-2 py-0.5 rounded-full shadow-xs">
+                                                    <ShieldAlert className="h-3 w-3 text-rose-600" /> Incompatible
+                                                  </div>
+                                                  <span className="text-[9px] text-rose-800 font-semibold truncate max-w-full px-1 mt-1">
+                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
+                                                  </span>
+                                                </>
+                                              ) : hoverCompatType === 'affinity' ? (
+                                                <>
+                                                  <div className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-200/90 px-2 py-0.5 rounded-full shadow-xs">
+                                                    <Heart className="h-3 w-3 fill-emerald-500 text-emerald-600" /> Afinidad
+                                                  </div>
+                                                  <span className="text-[9px] text-emerald-800 font-semibold truncate max-w-full px-1 mt-1">
+                                                    {companionNames.length > 0 ? `con ${companionNames.join(', ')}` : ''}
+                                                  </span>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <div className="text-[10px] font-bold text-indigo-700 bg-indigo-200/90 px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1">
+                                                    <ArrowDownUp className="h-3 w-3 text-indigo-600" />
+                                                    {student ? 'Intercambiar' : 'Asignar aquí'}
+                                                  </div>
+                                                  <span className="text-[9px] text-indigo-600 font-medium truncate max-w-full px-1 mt-0.5">
+                                                    {companionNames.length > 0
+                                                      ? `junto a ${companionNames.join(', ')}`
+                                                      : student
+                                                      ? student.nombre
+                                                      : 'Puesto libre'}
+                                                  </span>
+                                                </>
+                                              )}
+                                            </div>
+                                          )}
+
                                           {provided.placeholder}
                                         </div>
                                       )}

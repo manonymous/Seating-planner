@@ -7,7 +7,8 @@ import {
   Download, 
   Upload, 
   School,
-  Printer
+  Printer,
+  FileText
 } from 'lucide-react';
 import { Alumno, Aula } from './types';
 import { StudentList } from './components/StudentList';
@@ -115,9 +116,21 @@ function App() {
     }
   };
 
-  // Imprimir plano o exportar a PDF
-  const handlePrint = () => {
+  // Imprimir plano o exportar a PDF (Vertical o Horizontal)
+  const handlePrint = (orientation: 'portrait' | 'landscape' = 'portrait') => {
     setActiveTab('canvas');
+
+    let styleEl = document.getElementById('print-orientation-style') as HTMLStyleElement | null;
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'print-orientation-style';
+      document.head.appendChild(styleEl);
+    }
+    styleEl.innerHTML = `@media print { @page { size: ${orientation}; margin: 6mm; } }`;
+
+    document.body.classList.remove('print-portrait', 'print-landscape');
+    document.body.classList.add(`print-${orientation}`);
+
     setTimeout(() => {
       window.print();
     }, 200);
@@ -222,12 +235,21 @@ function App() {
           </button>
 
           <button
-            onClick={handlePrint}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
-            title="Imprimir o Guardar como PDF"
+            onClick={() => handlePrint('portrait')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold shadow-sm transition-all"
+            title="Imprimir plano en formato vertical (A4) - Evita cortes y muestra todas las filas"
           >
-            <Printer className="h-3.5 w-3.5 text-emerald-400" />
-            Imprimir / PDF
+            <FileText className="h-3.5 w-3.5 text-emerald-400" />
+            Imprimir PDF (Vertical)
+          </button>
+
+          <button
+            onClick={() => handlePrint('landscape')}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-medium transition-all shadow-sm"
+            title="Imprimir plano en formato horizontal (Apaisado)"
+          >
+            <Printer className="h-3.5 w-3.5 text-slate-500" />
+            Horizontal
           </button>
 
           <button
